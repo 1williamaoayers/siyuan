@@ -168,6 +168,10 @@ jobs:
       - name: 构建 APK
         run: |
           cd siyuan-android
+          # 创建签名配置文件（使用调试签名）
+          cp signings.templates.gradle signings.gradle
+          # 使用调试签名配置
+          sed -i 's/storeFile file.*/storeFile file("debug.keystore")/' signings.gradle || true
           chmod +x gradlew
           # 重试机制：最多尝试3次
           for i in 1 2 3; do
