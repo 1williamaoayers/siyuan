@@ -1009,16 +1009,8 @@ func IsSubscriber() bool {
 
 func IsPaidUser() bool {
 	// S3/WebDAV data sync and backup are available for a fee https://github.com/siyuan-note/siyuan/issues/8780
-
-	if IsSubscriber() {
-		return true
-	}
-
-	u := Conf.GetUser()
-	if nil == u {
-		return false
-	}
-	return 1 == u.UserSiYuanOneTimePayStatus
+	// [UNLOCKED] 解锁 S3/WebDAV 同步功能
+	return true
 }
 
 const (

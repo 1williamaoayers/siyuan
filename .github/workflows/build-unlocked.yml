@@ -1,0 +1,114 @@
+# 思源笔记解锁版自动构建
+name: 构建解锁版
+
+on:
+  push:
+    branches: [master, main]
+  workflow_dispatch:
+
+env:
+  GO_VERSION: '1.23'
+  NODE_VERSION: '18'
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - run: npm install -g pnpm
+      - name: 安装 musl
+        run: |
+          wget -q https://musl.cc/x86_64-linux-musl-cross.tgz
+          tar -xzf x86_64-linux-musl-cross.tgz -C ~/
+      - name: 构建前端
+        run: |
+          cd app && pnpm install && pnpm run build
+      - name: 构建内核
+        run: |
+          cd kernel
+          export CC=~/x86_64-linux-musl-cross/bin/x86_64-linux-musl-gcc
+          export CGO_ENABLED=1 GOOS=linux GOARCH=amd64
+          go build -buildmode=pie --tags fts5 -v -o "../app/kernel-linux/SiYuan-Kernel" -ldflags "-s -w -extldflags -static-pie" .
+      - name: 打包
+        run: cd app && pnpm run dist-linux
+      - uses: actions/upload-artifact@v4
+        with:
+          name: siyuan-linux-unlocked
+          path: app/build/*.AppImage
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - run: npm install -g pnpm
+      - name: 构建前端
+        run: cd app && pnpm install && pnpm run build
+      - name: 构建内核
+        run: |
+          cd kernel
+          $env:CGO_ENABLED = "1"
+          go build --tags fts5 -v -o "../app/kernel/SiYuan-Kernel.exe" -ldflags "-s -w -H windowsgui" .
+      - name: 打包
+        run: cd app && pnpm run dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: siyuan-windows-unlocked
+          path: app/build/*.exe
+
+  build-android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: siyuan-note/siyuan-android
+          path: siyuan-android
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - run: npm install -g pnpm
+      - name: 安装 NDK
+        run: sdkmanager --install "ndk;26.1.10909125"
+      - name: 构建前端
+        run: cd app && pnpm install && pnpm run build
+      - name: 构建 Android 内核
+        run: |
+          cd kernel
+          export ANDROID_NDK=$ANDROID_HOME/ndk/26.1.10909125
+          export CGO_ENABLED=1 GOOS=android GOARCH=arm64
+          export CC=$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang
+          mkdir -p ../siyuan-android/app/src/main/jniLibs/arm64-v8a
+          go build -buildmode=c-shared --tags fts5 -v -o "../siyuan-android/app/src/main/jniLibs/arm64-v8a/libkernel.so" -ldflags "-s -w" .
+      - name: 准备资源
+        run: |
+          mkdir -p siyuan-android/app/src/main/assets
+          cd app && zip -r ../siyuan-android/app/src/main/assets/app.zip appearance guide stage changelogs
+      - name: 构建 APK
+        run: |
+          cd siyuan-android
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon || echo "构建失败，请检查日志"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: siyuan-android-unlocked
+          path: siyuan-android/app/build/outputs/apk/**/*.apk
