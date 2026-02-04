@@ -168,12 +168,9 @@ jobs:
       - name: 构建 APK
         run: |
           cd siyuan-android
-          # 创建签名配置文件（使用调试签名）
           cp signings.templates.gradle signings.gradle
-          # 使用调试签名配置
           sed -i 's/storeFile file.*/storeFile file("debug.keystore")/' signings.gradle || true
           chmod +x gradlew
-          # 重试机制：最多尝试3次
           for i in 1 2 3; do
             ./gradlew assembleDebug --no-daemon && break || sleep 30
           done
@@ -182,3 +179,71 @@ jobs:
         with:
           name: siyuan-android-unlocked
           path: siyuan-android/app/build/outputs/apk/**/*.apk
+
+  # 创建 Release 并上传所有构建产物
+  release:
+    needs: [build-linux, build-windows, build-android]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: 获取版本号
+        id: version
+        run: |
+          VERSION=$(grep '"version"' app/package.json | head -1 | sed 's/.*"version": "\(.*\)".*/\1/')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "date=$(date +'%Y%m%d%H%M')" >> $GITHUB_OUTPUT
+      
+      - name: 下载 Linux 构建产物
+        uses: actions/download-artifact@v4
+        with:
+          name: siyuan-linux-unlocked
+          path: release/linux
+          
+      - name: 下载 Windows 构建产物
+        uses: actions/download-artifact@v4
+        with:
+          name: siyuan-windows-unlocked
+          path: release/windows
+          
+      - name: 下载 Android 构建产物
+        uses: actions/download-artifact@v4
+        with:
+          name: siyuan-android-unlocked
+          path: release/android
+          
+      - name: 整理文件
+        run: |
+          mkdir -p release/final
+          # Linux
+          cp release/linux/*.AppImage release/final/ 2>/dev/null || true
+          cp release/linux/*.tar.gz release/final/ 2>/dev/null || true
+          # Windows
+          cp release/windows/*.exe release/final/ 2>/dev/null || true
+          # Android - 只保留 official 版本
+          find release/android -name "*official*.apk" -exec cp {} release/final/ \; 2>/dev/null || true
+          ls -la release/final/
+          
+      - name: 创建 Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ steps.version.outputs.version }}-unlocked-${{ steps.version.outputs.date }}
+          name: 思源笔记解锁版 v${{ steps.version.outputs.version }}
+          body: |
+            ## 思源笔记解锁版 v${{ steps.version.outputs.version }}
+            
+            **解锁功能**：WebDAV/S3 同步（无需付费）
+            
+            ### 下载说明
+            - **Linux**: AppImage 可直接运行
+            - **Windows**: exe 安装包
+            - **Android**: APK 安装包（调试版）
+            
+            ### 注意事项
+            - 这是非官方修改版，仅供学习研究
+            - 如果觉得好用，请支持官方：https://b3log.org/siyuan/
+          files: release/final/*
+          draft: false
+          prerelease: false
